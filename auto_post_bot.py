@@ -7,6 +7,15 @@ from flask import Flask, send_from_directory, render_template_string
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw
 import threading
+import base64
+import requests
+from pathlib import Path
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import html
+
 
 load_dotenv()
 
@@ -25,6 +34,7 @@ EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
 EMAIL_IMAP = os.getenv("EMAIL_IMAP", "imap.gmail.com")
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
+NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 
 # === Time config ===
 POST_HOUR = int(os.getenv("POST_HOUR", "9"))
@@ -124,70 +134,111 @@ def generate_text_with_gemini(topic_title: str, mode: str) -> str:
     )
 
 
-def generate_image_with_gemini(topic_title: str, mode: str, out_path: Path) -> bool:
+# def generate_image_with_gemini(topic_title: str, mode: str, out_path: Path) -> bool:
+#     """
+#     Use gemini-2.5-flash-image for image generation.
+#     If a key gets 429 (Too Many Requests), try the next key.
+#     Only fall back to placeholder if all keys fail or are rate-limited.
+#     """
+#     api_keys = [k.strip() for k in os.getenv("GEMINI_KEYS", "").split(",") if k.strip()]
+#     if not api_keys:
+#         print("No GEMINI_KEYS set, skipping Gemini image.")
+#         return False
+
+#     model = "gemini-2.5-flash-image"
+
+#     if mode == "meme":
+#         style = (
+#             "An eye-catching, meme-style tech illustration in a 1:1 square format. "
+#             "Clean, bold composition, no text in the image, no logos, no real faces. "
+#             "Should clearly relate to the topic so that someone seeing the image "
+#             "can guess it is about streaming platforms and tech."
+#         )
+#     else:
+#         style = (
+#             "A clean, modern tech-themed illustration suitable for a LinkedIn post. "
+#             "1:1 square format, minimalistic, no logos, no real faces. "
+#             "Should visually relate to the topic."
+#         )
+
+#     prompt = f"{style} Topic: {topic_title}"
+
+#     body = {
+#         "contents": [
+#             {"parts": [{"text": prompt}]}
+#         ],
+#         "generationConfig": {
+#             "imageConfig": {"aspectRatio": "1:1"}
+#         }
+#     }
+
+#     last_error = None
+
+#     for key in api_keys:
+#         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+#         try:
+#             r = requests.post(url, json=body, timeout=120)
+#             if r.status_code == 429:
+#                 print("Image: key rate-limited, trying next Gemini key...")
+#                 last_error = "rate-limited"
+#                 continue
+#             r.raise_for_status()
+#             data = r.json()
+#             parts = data["candidates"][0]["content"]["parts"]
+#             img_part = next(p for p in parts if "inlineData" in p)
+#             b64 = img_part["inlineData"]["data"]
+#             img_bytes = base64.b64decode(b64)
+#             out_path.write_bytes(img_bytes)
+#             print("Gemini image saved.")
+#             return True
+#         except Exception as e:
+#             print("Gemini image error with one key:", e)
+#             last_error = str(e)
+#             continue
+
+#     print("All Gemini keys failed for image, last error:", last_error)
+#     return False
+def generate_image_with_nvidia(prompt: str, out_path: Path):
     """
-    Use gemini-2.5-flash-image for image generation.
-    If a key gets 429 (Too Many Requests), try the next key.
-    Only fall back to placeholder if all keys fail or are rate-limited.
+    Generate an image using NVIDIA NIM (Stable Diffusion 3 Medium).
+
+    Requires:
+      - NVIDIA_API_KEY in your environment
     """
-    api_keys = [k.strip() for k in os.getenv("GEMINI_KEYS", "").split(",") if k.strip()]
-    if not api_keys:
-        print("No GEMINI_KEYS set, skipping Gemini image.")
-        return False
+    if not NVIDIA_API_KEY:
+        raise RuntimeError("NVIDIA_API_KEY not set in environment")
 
-    model = "gemini-2.5-flash-image"
+    url = "https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-3-medium"
 
-    if mode == "meme":
-        style = (
-            "An eye-catching, meme-style tech illustration in a 1:1 square format. "
-            "Clean, bold composition, no text in the image, no logos, no real faces. "
-            "Should clearly relate to the topic so that someone seeing the image "
-            "can guess it is about streaming platforms and tech."
-        )
-    else:
-        style = (
-            "A clean, modern tech-themed illustration suitable for a LinkedIn post. "
-            "1:1 square format, minimalistic, no logos, no real faces. "
-            "Should visually relate to the topic."
-        )
-
-    prompt = f"{style} Topic: {topic_title}"
-
-    body = {
-        "contents": [
-            {"parts": [{"text": prompt}]}
-        ],
-        "generationConfig": {
-            "imageConfig": {"aspectRatio": "1:1"}
-        }
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
     }
 
-    last_error = None
+    payload = {
+        "prompt": prompt,
+        "cfg_scale": 5,
+        "aspect_ratio": "1:1",
+        "seed": 0,
+        "steps": 30,
+        "negative_prompt": ""
+    }
 
-    for key in api_keys:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-        try:
-            r = requests.post(url, json=body, timeout=120)
-            if r.status_code == 429:
-                print("Image: key rate-limited, trying next Gemini key...")
-                last_error = "rate-limited"
-                continue
-            r.raise_for_status()
-            data = r.json()
-            parts = data["candidates"][0]["content"]["parts"]
-            img_part = next(p for p in parts if "inlineData" in p)
-            b64 = img_part["inlineData"]["data"]
-            img_bytes = base64.b64decode(b64)
-            out_path.write_bytes(img_bytes)
-            print("Gemini image saved.")
-            return True
-        except Exception as e:
-            print("Gemini image error with one key:", e)
-            last_error = str(e)
-            continue
+    print("Calling NVIDIA NIM image API...")
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+    r.raise_for_status()
+    data = r.json()
 
-    print("All Gemini keys failed for image, last error:", last_error)
-    return False
+    # NIM returns base64-encoded PNG under "image" for SD3 Medium :contentReference[oaicite:2]{index=2}
+    image_b64 = data.get("image")
+    if not image_b64:
+        raise RuntimeError("NIM: no 'image' field in response")
+
+    img_bytes = base64.b64decode(image_b64)
+    with open(out_path, "wb") as f:
+        f.write(img_bytes)
+
+    print("NVIDIA NIM image saved:", out_path)
 
 from PIL import Image, ImageDraw, ImageFont
 import textwrap, random
@@ -340,29 +391,83 @@ def get_mode_for_today() -> str:
 
 # ---------- Email helpers ----------
 
-def send_email(to_addr: str, subject: str, body: str):
-    msg = EmailMessage()
+def send_email(to_address: str, subject: str, body_text: str, body_html: str | None = None):
+    msg = MIMEMultipart("alternative")
     msg["From"] = EMAIL_USER
-    msg["To"] = to_addr
+    msg["To"] = to_address
     msg["Subject"] = subject
-    msg.set_content(body)
-    with smtplib.SMTP(EMAIL_SMTP, EMAIL_SMTP_PORT) as s:
-        s.starttls()
+
+    # Plain text part (always)
+    part1 = MIMEText(body_text, "plain")
+    msg.attach(part1)
+
+    # Optional HTML part
+    if body_html:
+        part2 = MIMEText(body_html, "html")
+        msg.attach(part2)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(EMAIL_USER, EMAIL_PASS)
-        s.send_message(msg)
+        s.sendmail(EMAIL_USER, [to_address], msg.as_string())
 
 def send_preview_email(preview_id: str, title: str):
-    link = f"http://localhost:5000/preview/{preview_id}"
-    body = (
-        f"LinkedIn auto-post preview\n\n"
-        f"Topic: {title}\n"
-        f"Preview (open on your PC): {link}\n\n"
-        f"To approve, reply to this email with subject:\n"
-        f"APPROVE {preview_id}\n\n"
-        f"Scheduled posting: {POST_HOUR:02d}:00 (grace until +{POST_GRACE_MINUTES} min).\n"
+    preview_url = f"http://127.0.0.1:5000/preview/{preview_id}"
+
+    # Plain text fallback (for clients that ignore HTML)
+    body_text = f"""Preview for: {title}
+
+Preview URL:
+{preview_url}
+
+After reviewing, reply to this email with:
+
+APPROVE {preview_id}
+
+to post to LinkedIn at the scheduled time.
+"""
+
+    safe_title = html.escape(title)
+
+    # HTML body with a button
+    body_html = f"""
+    <html>
+      <body style="font-family: Arial, sans-serif; background-color: #f5f5f5; padding: 16px;">
+        <div style="max-width: 600px; margin: 0 auto; background: #ffffff; padding: 24px; border-radius: 8px;">
+          <h2 style="color:#0a66c2; margin-top:0;">📌 Preview your LinkedIn post</h2>
+          <p style="font-size: 16px; color:#333;">
+            <strong>{safe_title}</strong>
+          </p>
+          <p style="font-size: 14px; color:#555;">
+            Click the button below to open the post preview in your browser:
+          </p>
+          <p style="text-align:center; margin: 24px 0;">
+            <a href="{preview_url}"
+               style="display:inline-block; padding:12px 24px;
+                      background:#0a66c2; color:#ffffff; text-decoration:none;
+                      border-radius:6px; font-weight:bold;">
+              View Preview
+            </a>
+          </p>
+          <hr style="border:none; border-top:1px solid #eee; margin:24px 0;" />
+          <p style="font-size: 13px; color:#777; line-height:1.5;">
+            After reviewing, reply to this email with:<br/>
+            <code style="background:#f0f0f0; padding:4px 6px; border-radius:4px;">
+              APPROVE {preview_id}
+            </code><br/>
+            Your bot will then post it automatically to your LinkedIn profile.
+          </p>
+        </div>
+      </body>
+    </html>
+    """
+
+    send_email(
+        EMAIL_USER,
+        f"[Preview] LinkedIn {preview_id}",
+        body_text,
+        body_html
     )
-    send_email(EMAIL_USER, f"[Preview] LinkedIn {preview_id}", body)
-    print("Preview email sent.")
+
 
 def poll_for_approval(preview_id: str, deadline_dt: datetime.datetime) -> bool:
     M = imaplib.IMAP4_SSL(EMAIL_IMAP)
@@ -534,9 +639,25 @@ def main():
     (folder / "meta.json").write_text(json.dumps({"title": title, "url": url}, indent=2))
     (folder / "text.txt").write_text(text, encoding="utf-8")
 
+    # ---------- IMAGE GENERATION (NVIDIA NIM) ----------
     img_path = folder / "image.png"
-    if not generate_image_with_gemini(title, mode, img_path):
+    try:
+        image_prompt = f"""
+Professional, minimal, high-contrast tech artwork about:
+"{title}"
+
+Requirements:
+- 1:1 square aspect ratio
+- Clean, modern illustration
+- No logos of real companies
+- No real faces
+- Should look good as a LinkedIn post visual
+"""
+        generate_image_with_nvidia(image_prompt, img_path)
+    except Exception as e:
+        print("NVIDIA NIM image error:", e)
         fallback_image(title, img_path)
+    # ---------------------------------------------------
 
     send_preview_email(folder_id, title)
 
