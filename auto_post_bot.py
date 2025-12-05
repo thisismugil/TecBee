@@ -301,73 +301,214 @@ def fallback_image(topic_title: str, out_path: Path):
 
 # ---------- Trending topic (Hacker News) ----------
 
-import random
+# import random
+# import requests
+
+# def fetch_hackernews_top(limit: int = 10):
+#     """
+#     Try to fetch a top story from Hacker News.
+#     If there is any SSL/network error, fall back to a static topic list.
+#     This way the script never crashes just because HN is down or TLS is weird.
+#     """
+#     fallback_topics = [
+#         {
+#             "title": "Latest AI breakthroughs shaping 2025",
+#             "url": "https://ai.google",
+#             "score": 0,
+#         },
+#         {
+#             "title": "How GPUs are powering the next wave of AI startups",
+#             "url": "https://nvidia.com",
+#             "score": 0,
+#         },
+#         {
+#             "title": "Serverless vs containers: what modern teams actually use",
+#             "url": "https://aws.amazon.com",
+#             "score": 0,
+#         },
+#         {
+#             "title": "Top 5 trends in full-stack development for 2025",
+#             "url": "https://developer.mozilla.org",
+#             "score": 0,
+#         },
+#     ]
+
+#     try:
+#         ids_resp = requests.get(
+#             "https://hacker-news.firebaseio.com/v0/topstories.json",
+#             timeout=20
+#         )
+#         ids_resp.raise_for_status()
+#         ids = ids_resp.json()
+#         topics = []
+#         for id_ in ids[:limit]:
+#             try:
+#                 item_resp = requests.get(
+#                     f"https://hacker-news.firebaseio.com/v0/item/{id_}.json",
+#                     timeout=20
+#                 )
+#                 item_resp.raise_for_status()
+#                 item = item_resp.json()
+#                 topics.append({
+#                     "title": item.get("title", "No title"),
+#                     "url": item.get("url", "https://news.ycombinator.com/"),
+#                     "score": item.get("score", 0)
+#                 })
+#             except Exception as inner_e:
+#                 print("Error fetching an HN item, skipping:", inner_e)
+#                 continue
+
+#         if topics:
+#             topics.sort(key=lambda t: t["score"], reverse=True)
+#             return topics[0]
+#         else:
+#             print("No topics from HN, using fallback.")
+#             return random.choice(fallback_topics)
+
+#     except Exception as e:
+#         print("Hacker News fetch failed, using fallback topic. Error:", e)
+#         return random.choice(fallback_topics)
+import random, time
 import requests
+from pathlib import Path
 
-def fetch_hackernews_top(limit: int = 10):
+def fetch_trending_topic(limit: int = 50):
     """
-    Try to fetch a top story from Hacker News.
-    If there is any SSL/network error, fall back to a static topic list.
-    This way the script never crashes just because HN is down or TLS is weird.
+    Get a trending tech topic from live sources:
+      1) Hacker News top stories
+      2) Reddit /r/technology top (day)
+    Avoids repeating the last used title.
+    Falls back to a generic topic only if both fail.
     """
-    fallback_topics = [
-        {
-            "title": "Latest AI breakthroughs shaping 2025",
-            "url": "https://ai.google",
-            "score": 0,
-        },
-        {
-            "title": "How GPUs are powering the next wave of AI startups",
-            "url": "https://nvidia.com",
-            "score": 0,
-        },
-        {
-            "title": "Serverless vs containers: what modern teams actually use",
-            "url": "https://aws.amazon.com",
-            "score": 0,
-        },
-        {
-            "title": "Top 5 trends in full-stack development for 2025",
-            "url": "https://developer.mozilla.org",
-            "score": 0,
-        },
-    ]
 
+    # Remember last used topic to avoid repetition
+    last_title = None
+    last_path = ARCHIVE_DIR / "last_topic.txt"
+    if last_path.exists():
+        try:
+            last_title = last_path.read_text(encoding="utf-8").strip()
+        except Exception:
+            last_title = None
+
+    # ---------- 1) Try Hacker News ----------
     try:
+        print("Trying Hacker News for trending topic...")
         ids_resp = requests.get(
             "https://hacker-news.firebaseio.com/v0/topstories.json",
-            timeout=20
+            timeout=20,
         )
         ids_resp.raise_for_status()
         ids = ids_resp.json()
-        topics = []
+
+        candidates = []
         for id_ in ids[:limit]:
             try:
                 item_resp = requests.get(
                     f"https://hacker-news.firebaseio.com/v0/item/{id_}.json",
-                    timeout=20
+                    timeout=20,
                 )
                 item_resp.raise_for_status()
                 item = item_resp.json()
-                topics.append({
-                    "title": item.get("title", "No title"),
-                    "url": item.get("url", "https://news.ycombinator.com/"),
-                    "score": item.get("score", 0)
+
+                title = item.get("title", "")
+                url = item.get("url") or f"https://news.ycombinator.com/item?id={id_}"
+
+                # Ignore very short titles
+                if len(title) < 20:
+                    continue
+
+                # Skip if same as last used topic
+                if last_title and title.strip() == last_title:
+                    print("Skipping repeated HN topic:", title)
+                    continue
+
+                candidates.append({
+                    "title": title,
+                    "url": url,
+                    "score": item.get("score", 0),
+                    "source": "Hacker News",
                 })
-            except Exception as inner_e:
-                print("Error fetching an HN item, skipping:", inner_e)
+            except Exception as e:
+                print("Error fetching HN item, skipping:", e)
                 continue
 
-        if topics:
-            topics.sort(key=lambda t: t["score"], reverse=True)
-            return topics[0]
-        else:
-            print("No topics from HN, using fallback.")
-            return random.choice(fallback_topics)
+        if candidates:
+            # Random pick from filtered candidates (still trending)
+            random.shuffle(candidates)
+            chosen = random.choice(candidates)
+            print("Using HN topic:", chosen["title"])
+            # Save for next run so we don't repeat
+            last_path.write_text(chosen["title"], encoding="utf-8")
+            return chosen
 
+        print("No suitable HN topics (after filtering), moving to Reddit...")
     except Exception as e:
-        print("Hacker News fetch failed, using fallback topic. Error:", e)
-        return random.choice(fallback_topics)
+        print("Hacker News fetch failed:", e)
+
+    # ---------- 2) Try Reddit /r/technology ----------
+    try:
+        print("Trying Reddit /r/technology for trending topic...")
+        headers = {
+            "User-Agent": "TecBeeBot/0.1 (by your-email-or-username)"
+        }
+        r = requests.get(
+            "https://www.reddit.com/r/technology/top.json?t=day&limit=20",
+            headers=headers,
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+        posts = data.get("data", {}).get("children", [])
+
+        candidates = []
+        for p in posts:
+            d = p.get("data", {})
+            title = d.get("title", "")
+            url = (
+                d.get("url_overridden_by_dest")
+                or d.get("url")
+                or "https://www.reddit.com" + d.get("permalink", "")
+            )
+
+            if len(title) < 20:
+                continue
+
+            # Skip if same as last used topic
+            if last_title and title.strip() == last_title:
+                print("Skipping repeated Reddit topic:", title)
+                continue
+
+            candidates.append({
+                "title": title,
+                "url": url,
+                "score": d.get("score", 0),
+                "source": "Reddit /r/technology",
+            })
+
+        if candidates:
+            random.shuffle(candidates)
+            chosen = random.choice(candidates)
+            print("Using Reddit topic:", chosen["title"])
+            last_path.write_text(chosen["title"], encoding="utf-8")
+            return chosen
+
+        print("No suitable Reddit topics found.")
+    except Exception as e:
+        print("Reddit fetch failed:", e)
+
+    # ---------- 3) Last-resort fallback ----------
+    print("All live sources failed, using generic fallback topic.")
+    fallback = {
+        "title": "Latest trends and breakthroughs in modern technology",
+        "url": "https://www.google.com/search?q=latest+technology+trends",
+        "score": 0,
+        "source": "fallback",
+    }
+    try:
+        last_path.write_text(fallback["title"], encoding="utf-8")
+    except Exception:
+        pass
+    return fallback
 
 # ---------- Day-of-week mode rotation ----------
 
@@ -615,9 +756,9 @@ def post_to_linkedin(title: str, full_text: str, image_path: Path) -> bool:
 
 def main():
     now = datetime.datetime.now()
-    if now.hour < 6:
-        print("Too early (<06:00), exiting.")
-        return
+    # if now.hour < 6:
+    #     print("Too early (<06:00), exiting.")
+    #     return
 
     mode = get_mode_for_today()
     if mode == "none":
@@ -626,7 +767,7 @@ def main():
 
     start_preview_server()
 
-    topic = fetch_hackernews_top()
+    topic = fetch_trending_topic()
     title = topic["title"]
     url = topic["url"]
     print("Chosen topic:", title, url, "mode:", mode)
