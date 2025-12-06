@@ -130,7 +130,7 @@ def generate_text_with_gemini(topic_title: str, mode: str) -> str:
     return (
         f"Hey tech fam 👋\n\n"
         f"🔹 Quick update on: {topic_title}\n\n"
-        "Caption: Quick tech update.\n\n"
+        # "Caption: Quick tech update.\n\n"
         "#Tech #News"
     )
 
