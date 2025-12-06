@@ -38,7 +38,7 @@ EMAIL_PASS = os.getenv("EMAIL_PASS")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 
 # === Time config ===
-POST_HOUR = int(os.getenv("POST_HOUR", "9"))
+POST_HOUR = int(os.getenv("POST_HOUR", "8"))
 POST_GRACE_MINUTES = int(os.getenv("POST_GRACE_MINUTES", "15"))
 
 # ---------- Gemini helpers ----------
