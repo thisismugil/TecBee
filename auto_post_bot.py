@@ -33,6 +33,7 @@ EMAIL_SMTP = os.getenv("EMAIL_SMTP", "smtp.gmail.com")
 EMAIL_SMTP_PORT = int(os.getenv("EMAIL_SMTP_PORT", "587"))
 EMAIL_IMAP = os.getenv("EMAIL_IMAP", "imap.gmail.com")
 EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_TO = os.getenv("EMAIL_TO", EMAIL_USER)
 EMAIL_PASS = os.getenv("EMAIL_PASS")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY")
 
@@ -603,7 +604,7 @@ to post to LinkedIn at the scheduled time.
     """
 
     send_email(
-        EMAIL_USER,
+        EMAIL_TO,
         f"[Preview] LinkedIn {preview_id}",
         body_text,
         body_html
@@ -756,9 +757,9 @@ def post_to_linkedin(title: str, full_text: str, image_path: Path) -> bool:
 
 def main():
     now = datetime.datetime.now()
-    # if now.hour < 6:
-    #     print("Too early (<06:00), exiting.")
-    #     return
+    if now.hour < 6:
+        print("Too early (<06:00), exiting.")
+        return
 
     mode = get_mode_for_today()
     if mode == "none":
